@@ -23,9 +23,6 @@ const L = {
   spectatorOnly: "\u4f60\u662f\u65c1\u89c2\u8005\uff0c\u4ec5\u53ef\u89c2\u6218",
   joinFailed: "\u8fdb\u623f\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5",
   syncFailed: "\u8d70\u5b50\u540c\u6b65\u5931\u8d25\uff0c\u8bf7\u7b49\u5f85\u670d\u52a1\u5668\u72b6\u6001",
-  modeRed: "\u626e\u6f14\uff1a\u7ea2\u65b9",
-  modeBlack: "\u626e\u6f14\uff1a\u9ed1\u65b9",
-  modeSpectator: "\u8eab\u4efd\uff1a\u65c1\u89c2",
   notConnected: "\u672a\u8fde\u63a5\u670d\u52a1\u5668\uff0c\u8bf7\u91cd\u65b0\u8fdb\u623f",
   endedCanContinue: "\u5bf9\u5c40\u5df2\u7ed3\u675f\uff0c\u53ef\u9009\u62e9\u7ee7\u7eed\u6216\u9000\u51fa",
   playersOnlyContinue: "\u4ec5\u5bf9\u5f08\u53cc\u65b9\u53ef\u7ee7\u7eed\u5bf9\u5c40",
@@ -76,6 +73,8 @@ const nicknameInput = document.getElementById("nicknameInput");
 const roomInput = document.getElementById("roomInput");
 const joinBtn = document.getElementById("joinBtn");
 const joinError = document.getElementById("joinError");
+const endOverlay = document.getElementById("endOverlay");
+const endMessage = document.getElementById("endMessage");
 const canvas = document.getElementById("board");
 const ctx = canvas.getContext("2d");
 
@@ -107,6 +106,7 @@ syncButtons();
 bindSocketEvents();
 renderSession();
 setLobbyVisible(true);
+setEndOverlayVisible(false);
 
 canvas.addEventListener("click", onBoardClick);
 continueBtn.addEventListener("click", onContinueGame);
@@ -137,19 +137,13 @@ function isBoardFlipped() {
   return role === "black";
 }
 
-function roleLabel(currentRole) {
-  if (currentRole === "red") return L.modeRed;
-  if (currentRole === "black") return L.modeBlack;
-  return L.modeSpectator;
-}
-
 function renderSession() {
   const red = roomSnapshot.players.red || "\u5f85\u52a0\u5165";
   const black = roomSnapshot.players.black || "\u5f85\u52a0\u5165";
   const room = joinedRoomId || "-";
   const name = nickname || "-";
   sessionText.textContent =
-    `\u623f\u95f4\uff1a${room} | \u6635\u79f0\uff1a${name} | ${roleLabel(role)} | ` +
+    `\u623f\u95f4\uff1a${room} | \u6635\u79f0\uff1a${name} | ` +
     `\u7ea2\uff1a${red} \u9ed1\uff1a${black} \u65c1\u89c2\uff1a${roomSnapshot.spectatorCount}`;
 }
 
@@ -159,6 +153,20 @@ function setLobbyVisible(visible) {
 
 function setJoinError(message) {
   joinError.textContent = message || "";
+}
+
+function setEndOverlayVisible(visible) {
+  endOverlay.classList.toggle("hidden", !visible);
+}
+
+function updateEndOverlay() {
+  const shouldShow = Boolean(joinedRoomId && gameOver);
+  if (!shouldShow) {
+    setEndOverlayVisible(false);
+    return;
+  }
+  endMessage.textContent = statusText.textContent || L.endedCanContinue;
+  setEndOverlayVisible(true);
 }
 
 function resetLocalRoomState(message, asError = false) {
@@ -177,6 +185,7 @@ function resetLocalRoomState(message, asError = false) {
   gameOver = false;
   renderSession();
   setLobbyVisible(true);
+  setEndOverlayVisible(false);
   setJoinError(asError ? message : "");
   updateStatus(message || L.startHint);
   syncButtons();
@@ -271,6 +280,7 @@ function applyRemoteState(nextState) {
   waitingSyncAck = false;
   updateStatus(nextState.status || `${L.turnPrefix}${sideName(turn)}`);
   syncButtons();
+  updateEndOverlay();
   requestDraw();
 }
 
@@ -626,6 +636,7 @@ function onContinueGame() {
 function onLeaveRoom() {
   if (!joinedRoomId) {
     setLobbyVisible(true);
+    setEndOverlayVisible(false);
     return;
   }
 
@@ -763,6 +774,7 @@ function syncButtons() {
 function updateStatus(text) {
   statusText.textContent = text;
   refreshTurnTag();
+  updateEndOverlay();
 }
 
 function refreshTurnTag() {
@@ -1217,6 +1229,11 @@ function drawPieceAt(x, y, piece, isMoving) {
   const glyph = L.piece[piece.side][piece.type];
 
   ctx.save();
+  if (isBoardFlipped()) {
+    ctx.translate(x, y);
+    ctx.rotate(Math.PI);
+    ctx.translate(-x, -y);
+  }
   ctx.fillStyle = piece.side === "red" ? "rgb(255 236 220 / 24%)" : "rgb(255 249 236 / 18%)";
   ctx.fillText(glyph, x, y - 0.28);
   ctx.strokeStyle = sideInk;
