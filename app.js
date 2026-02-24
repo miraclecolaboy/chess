@@ -1,8 +1,8 @@
 const L = {
   docTitle: "\u4e2d\u56fd\u8c61\u68cb\uff08\u8054\u673a\u5bf9\u6218\uff09",
   heading: "\u4e2d\u56fd\u8c61\u68cb\u8054\u673a",
-  undo: "\u6094\u68cb\uff08\u672a\u5f00\u542f\uff09",
-  restart: "\u91cd\u5f00\uff08\u672a\u5f00\u542f\uff09",
+  continueGame: "\u7ee7\u7eed\u5bf9\u5c40",
+  leaveRoom: "\u9000\u51fa\u623f\u95f4",
   tips:
     "\u8f93\u5165\u6635\u79f0\u548c\u623f\u95f4\u53f7\u5373\u53ef\u8fdb\u623f\u3002\u524d\u4e24\u4eba\u4e3a\u7ea2/\u9ed1\u5bf9\u5f08\uff0c\u5176\u4f59\u7528\u6237\u81ea\u52a8\u65c1\u89c2\u3002",
   turnRed: "\u7ea2\u65b9",
@@ -27,6 +27,10 @@ const L = {
   modeBlack: "\u626e\u6f14\uff1a\u9ed1\u65b9",
   modeSpectator: "\u8eab\u4efd\uff1a\u65c1\u89c2",
   notConnected: "\u672a\u8fde\u63a5\u670d\u52a1\u5668\uff0c\u8bf7\u91cd\u65b0\u8fdb\u623f",
+  endedCanContinue: "\u5bf9\u5c40\u5df2\u7ed3\u675f\uff0c\u53ef\u9009\u62e9\u7ee7\u7eed\u6216\u9000\u51fa",
+  playersOnlyContinue: "\u4ec5\u5bf9\u5f08\u53cc\u65b9\u53ef\u7ee7\u7eed\u5bf9\u5c40",
+  waitAnotherPlayer: "\u9700\u8981\u4e24\u540d\u73a9\u5bb6\u5728\u573a\u624d\u80fd\u7ee7\u7eed",
+  leftRoom: "\u5df2\u9000\u51fa\u623f\u95f4",
   piece: {
     red: {
       rook: "\u8eca",
@@ -61,8 +65,8 @@ const BOARD_HEIGHT = MARGIN * 2 + CELL * (ROWS - 1);
 
 const titleText = document.getElementById("titleText");
 const sessionText = document.getElementById("sessionText");
-const undoBtn = document.getElementById("undoBtn");
-const restartBtn = document.getElementById("restartBtn");
+const continueBtn = document.getElementById("continueBtn");
+const leaveBtn = document.getElementById("leaveBtn");
 const turnTag = document.getElementById("turnTag");
 const statusText = document.getElementById("statusText");
 const tipsText = document.getElementById("tipsText");
@@ -105,8 +109,8 @@ renderSession();
 setLobbyVisible(true);
 
 canvas.addEventListener("click", onBoardClick);
-undoBtn.addEventListener("click", onUndo);
-restartBtn.addEventListener("click", onRestart);
+continueBtn.addEventListener("click", onContinueGame);
+leaveBtn.addEventListener("click", onLeaveRoom);
 joinForm.addEventListener("submit", onJoinSubmit);
 window.addEventListener("resize", () => {
   setupCanvas();
@@ -116,13 +120,21 @@ window.addEventListener("resize", () => {
 function applyStaticText() {
   document.title = L.docTitle;
   titleText.textContent = L.heading;
-  undoBtn.textContent = L.undo;
-  restartBtn.textContent = L.restart;
+  continueBtn.textContent = L.continueGame;
+  leaveBtn.textContent = L.leaveRoom;
   tipsText.textContent = L.tips;
 }
 
 function sideName(side) {
   return side === "red" ? L.turnRed : L.turnBlack;
+}
+
+function isPlayerRole(currentRole = role) {
+  return currentRole === "red" || currentRole === "black";
+}
+
+function isBoardFlipped() {
+  return role === "black";
 }
 
 function roleLabel(currentRole) {
@@ -149,6 +161,28 @@ function setJoinError(message) {
   joinError.textContent = message || "";
 }
 
+function resetLocalRoomState(message, asError = false) {
+  role = null;
+  nickname = "";
+  joinedRoomId = "";
+  roomSnapshot = {
+    players: { red: null, black: null },
+    spectatorCount: 0
+  };
+  waitingSyncAck = false;
+  board = createInitialBoard();
+  turn = "red";
+  selected = null;
+  legalMoves = [];
+  gameOver = false;
+  renderSession();
+  setLobbyVisible(true);
+  setJoinError(asError ? message : "");
+  updateStatus(message || L.startHint);
+  syncButtons();
+  requestDraw();
+}
+
 function bindSocketEvents() {
   socket.on("connect", () => {
     joinBtn.disabled = false;
@@ -163,22 +197,7 @@ function bindSocketEvents() {
   socket.on("disconnect", () => {
     joinBtn.disabled = false;
     if (joinedRoomId) {
-      role = null;
-      joinedRoomId = "";
-      roomSnapshot = {
-        players: { red: null, black: null },
-        spectatorCount: 0
-      };
-      board = createInitialBoard();
-      turn = "red";
-      selected = null;
-      legalMoves = [];
-      gameOver = false;
-      renderSession();
-      setLobbyVisible(true);
-      setJoinError(L.notConnected);
-      updateStatus(L.notConnected);
-      requestDraw();
+      resetLocalRoomState(L.notConnected, true);
     }
   });
 
@@ -193,33 +212,6 @@ function bindSocketEvents() {
     waitingSyncAck = false;
     if (!state) return;
     applyRemoteState(state);
-  });
-
-  socket.on("room-ending", ({ message }) => {
-    if (!message) return;
-    updateStatus(message);
-  });
-
-  socket.on("room-cleared", ({ message }) => {
-    role = null;
-    nickname = "";
-    joinedRoomId = "";
-    roomSnapshot = {
-      players: { red: null, black: null },
-      spectatorCount: 0
-    };
-    waitingSyncAck = false;
-    board = createInitialBoard();
-    turn = "red";
-    selected = null;
-    legalMoves = [];
-    gameOver = false;
-    renderSession();
-    setLobbyVisible(true);
-    setJoinError(message || "");
-    updateStatus(message || L.startHint);
-    syncButtons();
-    requestDraw();
   });
 }
 
@@ -283,7 +275,7 @@ function applyRemoteState(nextState) {
 }
 
 function syncStateToServer(lastMove) {
-  if (!joinedRoomId || role !== "red" && role !== "black") return;
+  if (!joinedRoomId || !isPlayerRole()) return;
 
   waitingSyncAck = true;
   socket.emit(
@@ -611,25 +603,56 @@ function opposite(side) {
   return side === "red" ? "black" : "red";
 }
 
-function onUndo() {
+function onContinueGame() {
   if (!joinedRoomId) return;
-  updateStatus("\u8054\u673a\u6a21\u5f0f\u4e0d\u652f\u6301\u6094\u68cb");
+  if (!isPlayerRole()) {
+    updateStatus(L.playersOnlyContinue);
+    return;
+  }
+  if (!gameOver) {
+    updateStatus(`${L.turnPrefix}${sideName(turn)}`);
+    return;
+  }
+
+  continueBtn.disabled = true;
+  socket.emit("restart-game", {}, (result) => {
+    continueBtn.disabled = false;
+    if (!result || !result.ok) {
+      updateStatus((result && result.message) || L.waitAnotherPlayer);
+    }
+  });
 }
 
-function onRestart() {
-  if (!joinedRoomId) return;
-  updateStatus("\u5bf9\u5c40\u7ed3\u675f\u540e\u623f\u95f4\u4f1a\u81ea\u52a8\u6e05\u7406\uff0c\u8bf7\u91cd\u65b0\u8fdb\u623f");
+function onLeaveRoom() {
+  if (!joinedRoomId) {
+    setLobbyVisible(true);
+    return;
+  }
+
+  leaveBtn.disabled = true;
+  socket.emit("leave-room", (result) => {
+    leaveBtn.disabled = false;
+    if (!result || !result.ok) {
+      updateStatus("\u9000\u51fa\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5");
+      return;
+    }
+    resetLocalRoomState(L.leftRoom, false);
+  });
 }
 
 function onBoardClick(event) {
-  if (gameOver || activeAnimation || waitingSyncAck) return;
+  if (activeAnimation || waitingSyncAck) return;
   if (!joinedRoomId) {
     setLobbyVisible(true);
     updateStatus(L.startHint);
     return;
   }
-  if (role !== "red" && role !== "black") {
+  if (!isPlayerRole()) {
     updateStatus(L.spectatorOnly);
+    return;
+  }
+  if (gameOver) {
+    updateStatus(L.endedCanContinue);
     return;
   }
   if (turn !== role) {
@@ -731,8 +754,10 @@ function startMoveAnimation(from, to, movingPiece, onDone) {
 }
 
 function syncButtons() {
-  undoBtn.disabled = true;
-  restartBtn.disabled = true;
+  const inRoom = Boolean(joinedRoomId);
+  const busy = Boolean(activeAnimation || waitingSyncAck);
+  continueBtn.disabled = !inRoom || busy || !gameOver || !isPlayerRole();
+  leaveBtn.disabled = !inRoom || busy;
 }
 
 function updateStatus(text) {
@@ -754,8 +779,12 @@ function gridToPixel(r, c) {
 
 function locateGridByPointer(event) {
   const rect = canvas.getBoundingClientRect();
-  const x = (event.clientX - rect.left) * (BOARD_WIDTH / rect.width);
-  const y = (event.clientY - rect.top) * (BOARD_HEIGHT / rect.height);
+  let x = (event.clientX - rect.left) * (BOARD_WIDTH / rect.width);
+  let y = (event.clientY - rect.top) * (BOARD_HEIGHT / rect.height);
+  if (isBoardFlipped()) {
+    x = BOARD_WIDTH - x;
+    y = BOARD_HEIGHT - y;
+  }
   const c = Math.round((x - MARGIN) / CELL);
   const r = Math.round((y - MARGIN) / CELL);
 
@@ -799,9 +828,18 @@ function renderFrame(now) {
 }
 
 function draw(now) {
+  ctx.clearRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
+  if (isBoardFlipped()) {
+    ctx.save();
+    ctx.translate(BOARD_WIDTH, BOARD_HEIGHT);
+    ctx.rotate(Math.PI);
+  }
   drawBoard();
   drawHighlights(now);
   drawPieces(now);
+  if (isBoardFlipped()) {
+    ctx.restore();
+  }
 }
 
 function strokeEngravedPath(trace, width = 1.1) {
@@ -824,8 +862,6 @@ function strokeEngravedPath(trace, width = 1.1) {
 }
 
 function drawBoard() {
-  ctx.clearRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
-
   const gridLeft = MARGIN;
   const gridTop = MARGIN;
   const gridWidth = CELL * (COLS - 1);

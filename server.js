@@ -4,7 +4,6 @@ const express = require("express");
 const { Server } = require("socket.io");
 
 const PORT = Number(process.env.PORT) || 3000;
-const CLEANUP_DELAY_MS = 3000;
 const ROWS = 10;
 const COLS = 9;
 const PIECE_TYPES = new Set([
@@ -33,31 +32,28 @@ const io = new Server(server, {
 const rooms = new Map();
 
 io.on("connection", (socket) => {
-  socket.on("join-room", (payload = {}, ack = () => {}) => {
+  socket.on("join-room", (payload = {}, ack) => {
+    const done = typeof ack === "function" ? ack : () => {};
     const nickname = normalizeNickname(payload.nickname);
     const roomId = normalizeRoomId(payload.roomId);
 
     if (!nickname || !roomId) {
-      ack({ ok: false, message: "请输入昵称和房间号" });
+      done({ ok: false, message: "请输入昵称和房间号" });
       return;
     }
 
     leaveCurrentRoom(socket);
 
     const room = getOrCreateRoom(roomId);
-    if (room.state.gameOver || room.cleanupTimer) {
-      ack({ ok: false, message: "该房间对局已结束，正在清理，请稍后重试" });
-      return;
-    }
-
     const role = assignRole(room, socket.id, nickname);
     room.members.add(socket.id);
+
     socket.join(roomId);
     socket.data.roomId = roomId;
     socket.data.role = role;
     socket.data.nickname = nickname;
 
-    ack({ ok: true });
+    done({ ok: true });
     socket.emit("joined", {
       roomId,
       nickname,
@@ -68,55 +64,88 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("room-info", serializeRoom(room));
   });
 
-  socket.on("sync-state", (payload = {}, ack = () => {}) => {
+  socket.on("sync-state", (payload = {}, ack) => {
+    const done = typeof ack === "function" ? ack : () => {};
     const roomId = socket.data.roomId;
     const role = socket.data.role;
+
     if (!roomId || !rooms.has(roomId)) {
-      ack({ ok: false, message: "房间不存在，请重新加入" });
+      done({ ok: false, message: "房间不存在，请重新加入" });
       return;
     }
+
     if (role !== "red" && role !== "black") {
-      ack({ ok: false, message: "旁观者不能走子" });
+      done({ ok: false, message: "旁观者不能走子" });
       return;
     }
 
     const room = rooms.get(roomId);
+
     if (room.state.gameOver) {
-      ack({ ok: false, message: "对局已结束" });
+      done({ ok: false, message: "本局已结束，请点击继续开始新局" });
       return;
     }
 
     if (room.state.turn !== role) {
-      ack({ ok: false, message: "还没轮到你" });
+      done({ ok: false, message: "还没轮到你" });
       return;
     }
 
     const nextState = sanitizeState(payload.state);
     if (!nextState) {
-      ack({ ok: false, message: "同步数据无效" });
+      done({ ok: false, message: "同步数据无效" });
       return;
     }
 
     if (!nextState.gameOver && nextState.turn === role) {
-      ack({ ok: false, message: "回合同步异常" });
+      done({ ok: false, message: "回合同步异常" });
       return;
     }
 
     room.state = nextState;
-    const lastMove = sanitizeMove(payload.lastMove);
     io.to(roomId).emit("state-sync", {
       state: room.state,
-      lastMove,
+      lastMove: sanitizeMove(payload.lastMove),
       by: role
     });
-    ack({ ok: true });
+    done({ ok: true });
+  });
 
-    if (room.state.gameOver) {
-      const status = room.state.status || "对局结束";
-      io.to(roomId).emit("room-ending", {
-        message: `${status}，${Math.floor(CLEANUP_DELAY_MS / 1000)}秒后清理房间`
-      });
-      scheduleRoomCleanup(roomId, status);
+  socket.on("restart-game", (_payload = {}, ack) => {
+    const done = typeof ack === "function" ? ack : () => {};
+    const roomId = socket.data.roomId;
+    const role = socket.data.role;
+
+    if (!roomId || !rooms.has(roomId)) {
+      done({ ok: false, message: "房间不存在，请重新加入" });
+      return;
+    }
+
+    if (role !== "red" && role !== "black") {
+      done({ ok: false, message: "仅玩家可以继续对局" });
+      return;
+    }
+
+    const room = rooms.get(roomId);
+    if (!room.players.red || !room.players.black) {
+      done({ ok: false, message: "需要两位玩家在场才能继续" });
+      return;
+    }
+
+    room.state = createInitialState();
+    io.to(roomId).emit("state-sync", {
+      state: room.state,
+      lastMove: null,
+      by: "system"
+    });
+    io.to(roomId).emit("room-info", serializeRoom(room));
+    done({ ok: true });
+  });
+
+  socket.on("leave-room", (ack) => {
+    leaveCurrentRoom(socket);
+    if (typeof ack === "function") {
+      ack({ ok: true });
     }
   });
 
@@ -169,15 +198,12 @@ function createInitialBoard() {
   board[2][7] = { side: "black", type: "cannon" };
   board[7][1] = { side: "red", type: "cannon" };
   board[7][7] = { side: "red", type: "cannon" };
+
   for (const c of [0, 2, 4, 6, 8]) {
     board[3][c] = { side: "black", type: "pawn" };
     board[6][c] = { side: "red", type: "pawn" };
   }
   return board;
-}
-
-function cloneBoard(board) {
-  return board.map((row) => row.map((piece) => (piece ? { ...piece } : null)));
 }
 
 function createInitialState() {
@@ -199,8 +225,7 @@ function getOrCreateRoom(roomId) {
       black: null
     },
     spectators: new Set(),
-    members: new Set(),
-    cleanupTimer: null
+    members: new Set()
   };
   rooms.set(roomId, room);
   return room;
@@ -275,6 +300,7 @@ function sanitizeBoard(rawBoard) {
       };
     }
   }
+
   return next;
 }
 
@@ -295,6 +321,7 @@ function leaveCurrentRoom(socket) {
   if (!roomId) return;
 
   const room = rooms.get(roomId);
+
   socket.leave(roomId);
   socket.data.roomId = null;
   socket.data.role = null;
@@ -316,51 +343,22 @@ function leaveCurrentRoom(socket) {
   }
 
   if (!room.members.size) {
-    clearRoomInternal(roomId);
+    rooms.delete(roomId);
     return;
   }
 
   if (playerLeft) {
-    clearRoomAndNotify(roomId, "有玩家离开，对局已结束");
-    return;
+    room.state = {
+      ...room.state,
+      gameOver: true,
+      status: "有玩家退出，本局已结束"
+    };
+    io.to(roomId).emit("state-sync", {
+      state: room.state,
+      lastMove: null,
+      by: "system"
+    });
   }
 
   io.to(roomId).emit("room-info", serializeRoom(room));
-}
-
-function scheduleRoomCleanup(roomId, reason) {
-  const room = rooms.get(roomId);
-  if (!room || room.cleanupTimer) return;
-  room.cleanupTimer = setTimeout(() => {
-    clearRoomAndNotify(roomId, `${reason}，房间已清理`);
-  }, CLEANUP_DELAY_MS);
-}
-
-function clearRoomAndNotify(roomId, message) {
-  const room = rooms.get(roomId);
-  if (!room) return;
-
-  const members = [...room.members];
-  clearRoomInternal(roomId);
-
-  for (const id of members) {
-    const client = io.sockets.sockets.get(id);
-    if (!client) continue;
-    client.leave(roomId);
-    client.data.roomId = null;
-    client.data.role = null;
-    client.data.nickname = null;
-    client.emit("room-cleared", {
-      message: `${message}。请重新输入房间号进入新对局。`
-    });
-  }
-}
-
-function clearRoomInternal(roomId) {
-  const room = rooms.get(roomId);
-  if (!room) return;
-  if (room.cleanupTimer) {
-    clearTimeout(room.cleanupTimer);
-  }
-  rooms.delete(roomId);
 }
