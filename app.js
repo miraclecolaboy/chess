@@ -3,8 +3,7 @@ const L = {
   heading: "\u4e2d\u56fd\u8c61\u68cb\u8054\u673a",
   continueGame: "\u7ee7\u7eed\u5bf9\u5c40",
   leaveRoom: "\u9000\u51fa\u623f\u95f4",
-  tips:
-    "\u8f93\u5165\u6635\u79f0\u548c\u623f\u95f4\u53f7\u5373\u53ef\u8fdb\u623f\u3002\u524d\u4e24\u4eba\u4e3a\u7ea2/\u9ed1\u5bf9\u5f08\uff0c\u5176\u4f59\u7528\u6237\u81ea\u52a8\u65c1\u89c2\u3002",
+  tips: "",
   turnRed: "\u7ea2\u65b9",
   turnBlack: "\u9ed1\u65b9",
   turnSuffix: "\u56de\u5408",
@@ -93,6 +92,8 @@ let roomSnapshot = {
   spectatorCount: 0
 };
 let waitingSyncAck = false;
+let lastSession = { nickname: "", roomId: "" };
+let pendingContinueAfterJoin = false;
 
 let boardGrainPattern = null;
 let boardSpeckPattern = null;
@@ -124,7 +125,13 @@ function applyStaticText() {
   titleText.textContent = L.heading;
   continueBtn.textContent = L.continueGame;
   leaveBtn.textContent = L.leaveRoom;
-  tipsText.textContent = L.tips;
+  if (L.tips) {
+    tipsText.textContent = L.tips;
+    tipsText.style.display = "";
+  } else {
+    tipsText.textContent = "";
+    tipsText.style.display = "none";
+  }
 }
 
 function sideName(side) {
@@ -184,6 +191,7 @@ function resetLocalRoomState(message, asError = false) {
     spectatorCount: 0
   };
   waitingSyncAck = false;
+  pendingContinueAfterJoin = false;
   board = createInitialBoard();
   turn = "red";
   selected = null;
@@ -262,6 +270,7 @@ function onJoinedRoom(payload) {
   role = payload.role || null;
   nickname = payload.nickname || "";
   joinedRoomId = payload.roomId || "";
+  lastSession = { nickname, roomId: joinedRoomId };
   waitingSyncAck = false;
 
   if (payload.room) {
@@ -276,6 +285,16 @@ function onJoinedRoom(payload) {
   applyRemoteState(payload.state);
   renderSession();
   refreshAvailabilityStatus();
+
+  if (pendingContinueAfterJoin) {
+    pendingContinueAfterJoin = false;
+    requestRestartGame((result) => {
+      continueBtn.disabled = false;
+      if (!result || !result.ok) {
+        updateStatus((result && result.message) || L.continueFailed);
+      }
+    });
+  }
 }
 
 function applyRemoteState(nextState) {
@@ -351,9 +370,9 @@ function createWoodGrainPattern() {
   const tctx = tile.getContext("2d");
 
   const base = tctx.createLinearGradient(0, 0, tile.width, tile.height);
-  base.addColorStop(0, "rgb(172 136 96 / 9%)");
-  base.addColorStop(0.5, "rgb(230 200 161 / 6%)");
-  base.addColorStop(1, "rgb(153 120 83 / 8%)");
+  base.addColorStop(0, "rgb(194 165 132 / 7%)");
+  base.addColorStop(0.5, "rgb(240 219 188 / 5%)");
+  base.addColorStop(1, "rgb(177 147 115 / 6%)");
   tctx.fillStyle = base;
   tctx.fillRect(0, 0, tile.width, tile.height);
 
@@ -361,7 +380,7 @@ function createWoodGrainPattern() {
     const y = 8 + i * 7 + (i % 4);
     const drift = (i % 2 === 0 ? 1 : -1) * (4 + (i % 6));
     tctx.strokeStyle =
-      i % 5 === 0 ? "rgb(126 91 56 / 14%)" : "rgb(242 216 178 / 10%)";
+      i % 5 === 0 ? "rgb(154 123 92 / 10%)" : "rgb(248 228 197 / 9%)";
     tctx.lineWidth = 0.8 + (i % 3) * 0.15;
     tctx.beginPath();
     tctx.moveTo(-24, y);
@@ -379,7 +398,7 @@ function createWoodGrainPattern() {
   for (let i = 0; i < 14; i++) {
     const cx = 16 + i * 14;
     const cy = 20 + ((i * 37) % 170);
-    tctx.strokeStyle = i % 2 === 0 ? "rgb(160 122 82 / 7%)" : "rgb(251 233 201 / 7%)";
+    tctx.strokeStyle = i % 2 === 0 ? "rgb(186 154 122 / 6%)" : "rgb(252 238 213 / 6%)";
     tctx.lineWidth = 0.75;
     tctx.beginPath();
     tctx.ellipse(cx, cy, 10 + (i % 3) * 2, 5 + (i % 2), 0.2, 0, Math.PI * 1.8);
@@ -399,7 +418,7 @@ function createSpeckPattern() {
     const x = (i * 47) % 120;
     const y = (i * 61 + 13) % 120;
     const r = i % 9 === 0 ? 0.95 : 0.55;
-    tctx.fillStyle = i % 2 === 0 ? "rgb(255 240 212 / 8%)" : "rgb(150 116 82 / 5%)";
+    tctx.fillStyle = i % 2 === 0 ? "rgb(255 246 226 / 7%)" : "rgb(183 149 117 / 4%)";
     tctx.beginPath();
     tctx.arc(x, y, r, 0, Math.PI * 2);
     tctx.fill();
@@ -634,19 +653,52 @@ function opposite(side) {
 }
 
 function onContinueGame() {
-  if (!joinedRoomId) return;
-  if (!isPlayerRole()) {
-    updateStatus(L.playersOnlyContinue);
-    return;
-  }
   if (!gameOver) {
     updateStatus(`${L.turnPrefix}${sideName(turn)}`);
     return;
   }
 
+  const resumeRoomId = joinedRoomId || lastSession.roomId;
+  const resumeNickname = nickname || lastSession.nickname;
+  if (!resumeRoomId || !resumeNickname) {
+    updateStatus(L.startHint);
+    return;
+  }
+
+  if (joinedRoomId && joinedRoomId === resumeRoomId && isPlayerRole()) {
+    continueBtn.disabled = true;
+    requestRestartGame((result) => {
+      continueBtn.disabled = false;
+      if (!result || !result.ok) {
+        updateStatus((result && result.message) || L.continueFailed);
+      }
+    });
+    return;
+  }
+
   continueBtn.disabled = true;
+  pendingContinueAfterJoin = true;
+  socket.emit(
+    "join-room",
+    {
+      nickname: resumeNickname,
+      roomId: resumeRoomId
+    },
+    (result) => {
+      if (result && result.ok) return;
+      pendingContinueAfterJoin = false;
+      continueBtn.disabled = false;
+      updateStatus((result && result.message) || L.joinFailed);
+    }
+  );
+}
+
+function requestRestartGame(onDone) {
   socket.emit("restart-game", {}, (result) => {
-    continueBtn.disabled = false;
+    if (typeof onDone === "function") {
+      onDone(result);
+      return;
+    }
     if (!result || !result.ok) {
       updateStatus((result && result.message) || L.continueFailed);
     }
@@ -914,20 +966,20 @@ function drawBoard() {
   const panelH = frameH - panelInset * 2;
 
   const tableBg = ctx.createLinearGradient(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
-  tableBg.addColorStop(0, "#d7b082");
-  tableBg.addColorStop(0.5, "#c69a69");
-  tableBg.addColorStop(1, "#b98957");
+  tableBg.addColorStop(0, "#ead0ad");
+  tableBg.addColorStop(0.5, "#dfbc93");
+  tableBg.addColorStop(1, "#d4a97d");
   ctx.fillStyle = tableBg;
   ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
 
   ctx.save();
-  ctx.shadowColor = "rgb(68 46 27 / 34%)";
+  ctx.shadowColor = "rgb(103 76 48 / 22%)";
   ctx.shadowBlur = 16;
   ctx.shadowOffsetY = 9;
   const frameGrad = ctx.createLinearGradient(frameX, frameY, frameX, frameY + frameH);
-  frameGrad.addColorStop(0, "#e0be93");
-  frameGrad.addColorStop(0.52, "#cfa678");
-  frameGrad.addColorStop(1, "#bb8a5e");
+  frameGrad.addColorStop(0, "#edd3ad");
+  frameGrad.addColorStop(0.52, "#debb92");
+  frameGrad.addColorStop(1, "#cca074");
   ctx.fillStyle = frameGrad;
   ctx.fillRect(frameX, frameY, frameW, frameH);
   ctx.restore();
@@ -945,7 +997,7 @@ function drawBoard() {
     const y = frameY + 14 + i * 36;
     const drift = (i % 2 === 0 ? 1 : -1) * (4 + (i % 3));
     ctx.beginPath();
-    ctx.strokeStyle = i % 3 === 0 ? "rgb(255 232 196 / 14%)" : "rgb(137 102 70 / 10%)";
+    ctx.strokeStyle = i % 3 === 0 ? "rgb(255 241 215 / 15%)" : "rgb(165 133 101 / 8%)";
     ctx.lineWidth = 1;
     ctx.moveTo(frameX - 20, y);
     ctx.bezierCurveTo(
@@ -960,17 +1012,17 @@ function drawBoard() {
   }
   ctx.restore();
 
-  ctx.strokeStyle = "rgb(112 79 51 / 72%)";
+  ctx.strokeStyle = "rgb(141 110 80 / 56%)";
   ctx.lineWidth = 2.35;
   ctx.strokeRect(frameX + 0.7, frameY + 0.7, frameW - 1.4, frameH - 1.4);
-  ctx.strokeStyle = "rgb(255 236 205 / 34%)";
+  ctx.strokeStyle = "rgb(255 245 223 / 38%)";
   ctx.lineWidth = 1.1;
   ctx.strokeRect(frameX + 3.6, frameY + 3.6, frameW - 7.2, frameH - 7.2);
 
   const panelGrad = ctx.createLinearGradient(panelX, panelY, panelX, panelY + panelH);
-  panelGrad.addColorStop(0, "#f8e8ca");
-  panelGrad.addColorStop(0.52, "#f1d7ad");
-  panelGrad.addColorStop(1, "#e7c28f");
+  panelGrad.addColorStop(0, "#fcf1dc");
+  panelGrad.addColorStop(0.52, "#f6e2bf");
+  panelGrad.addColorStop(1, "#eccda1");
   ctx.fillStyle = panelGrad;
   ctx.fillRect(panelX, panelY, panelW, panelH);
 
@@ -993,7 +1045,7 @@ function drawBoard() {
       const cx = gridLeft + c * CELL + CELL * 0.5;
       const cy = gridTop + r * CELL + CELL * 0.5;
       ctx.beginPath();
-      ctx.strokeStyle = (r + c) % 2 === 0 ? "rgb(146 114 83 / 8%)" : "rgb(255 236 203 / 10%)";
+      ctx.strokeStyle = (r + c) % 2 === 0 ? "rgb(174 143 113 / 7%)" : "rgb(255 244 220 / 10%)";
       ctx.lineWidth = 0.42;
       ctx.ellipse(cx, cy, 16, 8, 0.22, 0, Math.PI * 1.9);
       ctx.stroke();
@@ -1004,14 +1056,14 @@ function drawBoard() {
   const innerGlow = ctx.createLinearGradient(panelX, panelY, panelX, panelY + panelH);
   innerGlow.addColorStop(0, "rgb(255 242 215 / 14%)");
   innerGlow.addColorStop(0.2, "rgb(255 236 206 / 3%)");
-  innerGlow.addColorStop(1, "rgb(153 120 85 / 8%)");
+  innerGlow.addColorStop(1, "rgb(182 150 119 / 7%)");
   ctx.fillStyle = innerGlow;
   ctx.fillRect(panelX, panelY, panelW, panelH);
 
-  ctx.strokeStyle = "rgb(145 112 79 / 50%)";
+  ctx.strokeStyle = "rgb(170 139 108 / 44%)";
   ctx.lineWidth = 1.45;
   ctx.strokeRect(gridLeft - 0.5, gridTop - 0.5, gridWidth + 1, gridHeight + 1);
-  ctx.strokeStyle = "rgb(255 237 207 / 30%)";
+  ctx.strokeStyle = "rgb(255 246 224 / 34%)";
   ctx.lineWidth = 0.75;
   ctx.strokeRect(gridLeft + 0.9, gridTop + 0.9, gridWidth - 1.8, gridHeight - 1.8);
 
@@ -1113,18 +1165,18 @@ function drawRiver() {
   const riverH = CELL - 5;
 
   const riverTint = ctx.createLinearGradient(riverX, riverY, riverX, riverY + riverH);
-  riverTint.addColorStop(0, "rgb(184 146 104 / 5%)");
-  riverTint.addColorStop(0.5, "rgb(255 239 214 / 4%)");
-  riverTint.addColorStop(1, "rgb(154 121 84 / 5%)");
+  riverTint.addColorStop(0, "rgb(206 174 139 / 4%)");
+  riverTint.addColorStop(0.5, "rgb(255 244 224 / 4%)");
+  riverTint.addColorStop(1, "rgb(187 155 121 / 4%)");
   ctx.fillStyle = riverTint;
   ctx.fillRect(riverX, riverY, riverW, riverH);
 
-  ctx.fillStyle = "rgb(121 108 91 / 72%)";
+  ctx.fillStyle = "rgb(132 119 103 / 68%)";
   ctx.font = "700 50px 'STKaiti', 'KaiTi', 'Noto Serif SC', serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   const y = MARGIN + CELL * 4.5 + 1;
-  ctx.strokeStyle = "rgb(255 245 226 / 34%)";
+  ctx.strokeStyle = "rgb(255 248 232 / 36%)";
   ctx.lineWidth = 0.8;
   drawRiverLabel(L.riverLeft, MARGIN + CELL * 2, y);
   drawRiverLabel(L.riverRight, MARGIN + CELL * 6, y);

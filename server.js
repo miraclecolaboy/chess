@@ -1,4 +1,4 @@
-const http = require("http");
+﻿const http = require("http");
 const path = require("path");
 const express = require("express");
 const { Server } = require("socket.io");
@@ -15,6 +15,21 @@ const PIECE_TYPES = new Set([
   "cannon",
   "pawn"
 ]);
+const STATUS_TURN_RED = "\u8f6e\u5230\u7ea2\u65b9";
+const STATUS_TURN_BLACK = "\u8f6e\u5230\u9ed1\u65b9";
+const STATUS_GAME_START = "\u65b0\u5bf9\u5c40\u5f00\u59cb\uff0c\u7ea2\u65b9\u5148\u884c";
+const STATUS_WAIT_RECONNECT =
+  "\u6709\u73a9\u5bb6\u79bb\u7ebf\uff0c\u8bf7\u7b49\u5f85\u91cd\u8fde\u6216\u9000\u51fa\u623f\u95f4";
+const MSG_WAIT_RECONNECT_MOVE =
+  "\u6709\u73a9\u5bb6\u79bb\u7ebf\uff0c\u6682\u65f6\u65e0\u6cd5\u8d70\u5b50";
+const MSG_NEED_INFO = "\u8bf7\u8f93\u5165\u6635\u79f0\u548c\u623f\u95f4\u53f7";
+const MSG_ROOM_NOT_FOUND = "\u623f\u95f4\u4e0d\u5b58\u5728\uff0c\u8bf7\u91cd\u65b0\u52a0\u5165";
+const MSG_SPECTATOR_CANT_MOVE = "\u65c1\u89c2\u8005\u4e0d\u80fd\u8d70\u5b50";
+const MSG_GAME_OVER_RESTART = "\u672c\u5c40\u5df2\u7ed3\u675f\uff0c\u8bf7\u70b9\u51fb\u7ee7\u7eed\u5f00\u59cb\u65b0\u5c40";
+const MSG_NOT_YOUR_TURN = "\u8fd8\u672a\u8f6e\u5230\u4f60";
+const MSG_INVALID_SYNC_DATA = "\u540c\u6b65\u6570\u636e\u65e0\u6548";
+const MSG_INVALID_TURN_SYNC = "\u56de\u5408\u540c\u6b65\u5f02\u5e38";
+const MSG_PLAYERS_ONLY_CONTINUE = "\u4ec5\u73a9\u5bb6\u53ef\u4ee5\u7ee7\u7eed\u5bf9\u5c40";
 
 const app = express();
 app.use(express.static(path.resolve(__dirname)));
@@ -38,7 +53,7 @@ io.on("connection", (socket) => {
     const roomId = normalizeRoomId(payload.roomId);
 
     if (!nickname || !roomId) {
-      done({ ok: false, message: "请输入昵称和房间号" });
+      done({ ok: false, message: MSG_NEED_INFO });
       return;
     }
 
@@ -47,6 +62,16 @@ io.on("connection", (socket) => {
     const room = getOrCreateRoom(roomId);
     const role = assignRole(room, socket.id, nickname);
     room.members.add(socket.id);
+    if (
+      hasBothPlayers(room) &&
+      !room.state.gameOver &&
+      room.state.status === STATUS_WAIT_RECONNECT
+    ) {
+      room.state = {
+        ...room.state,
+        status: room.state.turn === "black" ? STATUS_TURN_BLACK : STATUS_TURN_RED
+      };
+    }
 
     socket.join(roomId);
     socket.data.roomId = roomId;
@@ -70,35 +95,39 @@ io.on("connection", (socket) => {
     const role = socket.data.role;
 
     if (!roomId || !rooms.has(roomId)) {
-      done({ ok: false, message: "房间不存在，请重新加入" });
+      done({ ok: false, message: MSG_ROOM_NOT_FOUND });
       return;
     }
 
     if (role !== "red" && role !== "black") {
-      done({ ok: false, message: "旁观者不能走子" });
+      done({ ok: false, message: MSG_SPECTATOR_CANT_MOVE });
       return;
     }
 
     const room = rooms.get(roomId);
+    if (!hasBothPlayers(room)) {
+      done({ ok: false, message: MSG_WAIT_RECONNECT_MOVE });
+      return;
+    }
 
     if (room.state.gameOver) {
-      done({ ok: false, message: "本局已结束，请点击继续开始新局" });
+      done({ ok: false, message: MSG_GAME_OVER_RESTART });
       return;
     }
 
     if (room.state.turn !== role) {
-      done({ ok: false, message: "还没轮到你" });
+      done({ ok: false, message: MSG_NOT_YOUR_TURN });
       return;
     }
 
     const nextState = sanitizeState(payload.state);
     if (!nextState) {
-      done({ ok: false, message: "同步数据无效" });
+      done({ ok: false, message: MSG_INVALID_SYNC_DATA });
       return;
     }
 
     if (!nextState.gameOver && nextState.turn === role) {
-      done({ ok: false, message: "回合同步异常" });
+      done({ ok: false, message: MSG_INVALID_TURN_SYNC });
       return;
     }
 
@@ -117,20 +146,16 @@ io.on("connection", (socket) => {
     const role = socket.data.role;
 
     if (!roomId || !rooms.has(roomId)) {
-      done({ ok: false, message: "房间不存在，请重新加入" });
+      done({ ok: false, message: MSG_ROOM_NOT_FOUND });
       return;
     }
 
     if (role !== "red" && role !== "black") {
-      done({ ok: false, message: "仅玩家可以继续对局" });
+      done({ ok: false, message: MSG_PLAYERS_ONLY_CONTINUE });
       return;
     }
 
     const room = rooms.get(roomId);
-    if (!room.players.red || !room.players.black) {
-      done({ ok: false, message: "需要两位玩家在场才能继续" });
-      return;
-    }
 
     room.state = createInitialState();
     io.to(roomId).emit("state-sync", {
@@ -211,7 +236,7 @@ function createInitialState() {
     board: createInitialBoard(),
     turn: "red",
     gameOver: false,
-    status: "新对局开始，红方先行"
+    status: STATUS_GAME_START
   };
 }
 
@@ -252,6 +277,10 @@ function serializeRoom(room) {
     },
     spectatorCount: room.spectators.size
   };
+}
+
+function hasBothPlayers(room) {
+  return Boolean(room.players.red && room.players.black);
 }
 
 function sanitizeMove(raw) {
@@ -347,11 +376,10 @@ function leaveCurrentRoom(socket) {
     return;
   }
 
-  if (playerLeft) {
+  if (playerLeft && !room.state.gameOver) {
     room.state = {
       ...room.state,
-      gameOver: true,
-      status: "有玩家退出，本局已结束"
+      status: STATUS_WAIT_RECONNECT
     };
     io.to(roomId).emit("state-sync", {
       state: room.state,
