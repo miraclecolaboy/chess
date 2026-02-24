@@ -26,7 +26,9 @@ const L = {
   notConnected: "\u672a\u8fde\u63a5\u670d\u52a1\u5668\uff0c\u8bf7\u91cd\u65b0\u8fdb\u623f",
   endedCanContinue: "\u5bf9\u5c40\u5df2\u7ed3\u675f\uff0c\u53ef\u9009\u62e9\u7ee7\u7eed\u6216\u9000\u51fa",
   playersOnlyContinue: "\u4ec5\u5bf9\u5f08\u53cc\u65b9\u53ef\u7ee7\u7eed\u5bf9\u5c40",
-  waitAnotherPlayer: "\u9700\u8981\u4e24\u540d\u73a9\u5bb6\u5728\u573a\u624d\u80fd\u7ee7\u7eed",
+  waitReconnectOrLeave:
+    "\u6709\u73a9\u5bb6\u79bb\u7ebf\uff0c\u8bf7\u7b49\u5f85\u91cd\u8fde\u6216\u9000\u51fa\u623f\u95f4",
+  continueFailed: "\u7ee7\u7eed\u5bf9\u5c40\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5",
   leftRoom: "\u5df2\u9000\u51fa\u623f\u95f4",
   piece: {
     red: {
@@ -133,6 +135,10 @@ function isPlayerRole(currentRole = role) {
   return currentRole === "red" || currentRole === "black";
 }
 
+function hasBothPlayersInRoom(snapshot = roomSnapshot) {
+  return Boolean(snapshot.players && snapshot.players.red && snapshot.players.black);
+}
+
 function isBoardFlipped() {
   return role === "black";
 }
@@ -215,6 +221,7 @@ function bindSocketEvents() {
     if (!roomInfo) return;
     roomSnapshot = roomInfo;
     renderSession();
+    refreshAvailabilityStatus();
   });
 
   socket.on("state-sync", ({ state }) => {
@@ -268,6 +275,7 @@ function onJoinedRoom(payload) {
   setJoinError("");
   applyRemoteState(payload.state);
   renderSession();
+  refreshAvailabilityStatus();
 }
 
 function applyRemoteState(nextState) {
@@ -279,9 +287,21 @@ function applyRemoteState(nextState) {
   legalMoves = [];
   waitingSyncAck = false;
   updateStatus(nextState.status || `${L.turnPrefix}${sideName(turn)}`);
+  refreshAvailabilityStatus();
   syncButtons();
   updateEndOverlay();
   requestDraw();
+}
+
+function refreshAvailabilityStatus() {
+  if (!joinedRoomId || gameOver) return;
+  if (!hasBothPlayersInRoom()) {
+    updateStatus(L.waitReconnectOrLeave);
+    return;
+  }
+  if (statusText.textContent === L.waitReconnectOrLeave) {
+    updateStatus(`${L.turnPrefix}${sideName(turn)}`);
+  }
 }
 
 function syncStateToServer(lastMove) {
@@ -331,9 +351,9 @@ function createWoodGrainPattern() {
   const tctx = tile.getContext("2d");
 
   const base = tctx.createLinearGradient(0, 0, tile.width, tile.height);
-  base.addColorStop(0, "rgb(138 95 56 / 11%)");
-  base.addColorStop(0.5, "rgb(206 161 114 / 6%)");
-  base.addColorStop(1, "rgb(93 63 36 / 10%)");
+  base.addColorStop(0, "rgb(172 136 96 / 9%)");
+  base.addColorStop(0.5, "rgb(230 200 161 / 6%)");
+  base.addColorStop(1, "rgb(153 120 83 / 8%)");
   tctx.fillStyle = base;
   tctx.fillRect(0, 0, tile.width, tile.height);
 
@@ -341,7 +361,7 @@ function createWoodGrainPattern() {
     const y = 8 + i * 7 + (i % 4);
     const drift = (i % 2 === 0 ? 1 : -1) * (4 + (i % 6));
     tctx.strokeStyle =
-      i % 5 === 0 ? "rgb(90 59 34 / 18%)" : "rgb(232 197 149 / 11%)";
+      i % 5 === 0 ? "rgb(126 91 56 / 14%)" : "rgb(242 216 178 / 10%)";
     tctx.lineWidth = 0.8 + (i % 3) * 0.15;
     tctx.beginPath();
     tctx.moveTo(-24, y);
@@ -359,7 +379,7 @@ function createWoodGrainPattern() {
   for (let i = 0; i < 14; i++) {
     const cx = 16 + i * 14;
     const cy = 20 + ((i * 37) % 170);
-    tctx.strokeStyle = i % 2 === 0 ? "rgb(130 88 51 / 8%)" : "rgb(249 222 182 / 8%)";
+    tctx.strokeStyle = i % 2 === 0 ? "rgb(160 122 82 / 7%)" : "rgb(251 233 201 / 7%)";
     tctx.lineWidth = 0.75;
     tctx.beginPath();
     tctx.ellipse(cx, cy, 10 + (i % 3) * 2, 5 + (i % 2), 0.2, 0, Math.PI * 1.8);
@@ -379,7 +399,7 @@ function createSpeckPattern() {
     const x = (i * 47) % 120;
     const y = (i * 61 + 13) % 120;
     const r = i % 9 === 0 ? 0.95 : 0.55;
-    tctx.fillStyle = i % 2 === 0 ? "rgb(255 236 200 / 8%)" : "rgb(93 63 35 / 7%)";
+    tctx.fillStyle = i % 2 === 0 ? "rgb(255 240 212 / 8%)" : "rgb(150 116 82 / 5%)";
     tctx.beginPath();
     tctx.arc(x, y, r, 0, Math.PI * 2);
     tctx.fill();
@@ -628,7 +648,7 @@ function onContinueGame() {
   socket.emit("restart-game", {}, (result) => {
     continueBtn.disabled = false;
     if (!result || !result.ok) {
-      updateStatus((result && result.message) || L.waitAnotherPlayer);
+      updateStatus((result && result.message) || L.continueFailed);
     }
   });
 }
@@ -664,6 +684,10 @@ function onBoardClick(event) {
   }
   if (gameOver) {
     updateStatus(L.endedCanContinue);
+    return;
+  }
+  if (!hasBothPlayersInRoom()) {
+    updateStatus(L.waitReconnectOrLeave);
     return;
   }
   if (turn !== role) {
@@ -890,20 +914,20 @@ function drawBoard() {
   const panelH = frameH - panelInset * 2;
 
   const tableBg = ctx.createLinearGradient(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
-  tableBg.addColorStop(0, "#6f4527");
-  tableBg.addColorStop(0.5, "#5f3b21");
-  tableBg.addColorStop(1, "#51311b");
+  tableBg.addColorStop(0, "#d7b082");
+  tableBg.addColorStop(0.5, "#c69a69");
+  tableBg.addColorStop(1, "#b98957");
   ctx.fillStyle = tableBg;
   ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
 
   ctx.save();
-  ctx.shadowColor = "rgb(34 19 8 / 55%)";
+  ctx.shadowColor = "rgb(68 46 27 / 34%)";
   ctx.shadowBlur = 16;
   ctx.shadowOffsetY = 9;
   const frameGrad = ctx.createLinearGradient(frameX, frameY, frameX, frameY + frameH);
-  frameGrad.addColorStop(0, "#ad794d");
-  frameGrad.addColorStop(0.52, "#8e5e39");
-  frameGrad.addColorStop(1, "#734829");
+  frameGrad.addColorStop(0, "#e0be93");
+  frameGrad.addColorStop(0.52, "#cfa678");
+  frameGrad.addColorStop(1, "#bb8a5e");
   ctx.fillStyle = frameGrad;
   ctx.fillRect(frameX, frameY, frameW, frameH);
   ctx.restore();
@@ -921,7 +945,7 @@ function drawBoard() {
     const y = frameY + 14 + i * 36;
     const drift = (i % 2 === 0 ? 1 : -1) * (4 + (i % 3));
     ctx.beginPath();
-    ctx.strokeStyle = i % 3 === 0 ? "rgb(255 217 166 / 10%)" : "rgb(83 53 30 / 15%)";
+    ctx.strokeStyle = i % 3 === 0 ? "rgb(255 232 196 / 14%)" : "rgb(137 102 70 / 10%)";
     ctx.lineWidth = 1;
     ctx.moveTo(frameX - 20, y);
     ctx.bezierCurveTo(
@@ -936,17 +960,17 @@ function drawBoard() {
   }
   ctx.restore();
 
-  ctx.strokeStyle = "rgb(65 40 20 / 86%)";
+  ctx.strokeStyle = "rgb(112 79 51 / 72%)";
   ctx.lineWidth = 2.35;
   ctx.strokeRect(frameX + 0.7, frameY + 0.7, frameW - 1.4, frameH - 1.4);
-  ctx.strokeStyle = "rgb(248 216 170 / 30%)";
+  ctx.strokeStyle = "rgb(255 236 205 / 34%)";
   ctx.lineWidth = 1.1;
   ctx.strokeRect(frameX + 3.6, frameY + 3.6, frameW - 7.2, frameH - 7.2);
 
   const panelGrad = ctx.createLinearGradient(panelX, panelY, panelX, panelY + panelH);
-  panelGrad.addColorStop(0, "#f2d7aa");
-  panelGrad.addColorStop(0.52, "#e9c694");
-  panelGrad.addColorStop(1, "#ddad75");
+  panelGrad.addColorStop(0, "#f8e8ca");
+  panelGrad.addColorStop(0.52, "#f1d7ad");
+  panelGrad.addColorStop(1, "#e7c28f");
   ctx.fillStyle = panelGrad;
   ctx.fillRect(panelX, panelY, panelW, panelH);
 
@@ -969,7 +993,7 @@ function drawBoard() {
       const cx = gridLeft + c * CELL + CELL * 0.5;
       const cy = gridTop + r * CELL + CELL * 0.5;
       ctx.beginPath();
-      ctx.strokeStyle = (r + c) % 2 === 0 ? "rgb(118 83 50 / 10%)" : "rgb(255 226 182 / 10%)";
+      ctx.strokeStyle = (r + c) % 2 === 0 ? "rgb(146 114 83 / 8%)" : "rgb(255 236 203 / 10%)";
       ctx.lineWidth = 0.42;
       ctx.ellipse(cx, cy, 16, 8, 0.22, 0, Math.PI * 1.9);
       ctx.stroke();
@@ -980,14 +1004,14 @@ function drawBoard() {
   const innerGlow = ctx.createLinearGradient(panelX, panelY, panelX, panelY + panelH);
   innerGlow.addColorStop(0, "rgb(255 242 215 / 14%)");
   innerGlow.addColorStop(0.2, "rgb(255 236 206 / 3%)");
-  innerGlow.addColorStop(1, "rgb(112 77 47 / 11%)");
+  innerGlow.addColorStop(1, "rgb(153 120 85 / 8%)");
   ctx.fillStyle = innerGlow;
   ctx.fillRect(panelX, panelY, panelW, panelH);
 
-  ctx.strokeStyle = "rgb(120 86 54 / 58%)";
+  ctx.strokeStyle = "rgb(145 112 79 / 50%)";
   ctx.lineWidth = 1.45;
   ctx.strokeRect(gridLeft - 0.5, gridTop - 0.5, gridWidth + 1, gridHeight + 1);
-  ctx.strokeStyle = "rgb(250 222 181 / 26%)";
+  ctx.strokeStyle = "rgb(255 237 207 / 30%)";
   ctx.lineWidth = 0.75;
   ctx.strokeRect(gridLeft + 0.9, gridTop + 0.9, gridWidth - 1.8, gridHeight - 1.8);
 
@@ -1089,23 +1113,33 @@ function drawRiver() {
   const riverH = CELL - 5;
 
   const riverTint = ctx.createLinearGradient(riverX, riverY, riverX, riverY + riverH);
-  riverTint.addColorStop(0, "rgb(160 112 67 / 7%)");
-  riverTint.addColorStop(0.5, "rgb(255 231 194 / 3%)");
-  riverTint.addColorStop(1, "rgb(101 71 42 / 7%)");
+  riverTint.addColorStop(0, "rgb(184 146 104 / 5%)");
+  riverTint.addColorStop(0.5, "rgb(255 239 214 / 4%)");
+  riverTint.addColorStop(1, "rgb(154 121 84 / 5%)");
   ctx.fillStyle = riverTint;
   ctx.fillRect(riverX, riverY, riverW, riverH);
 
-  ctx.fillStyle = "rgb(126 108 86 / 76%)";
+  ctx.fillStyle = "rgb(121 108 91 / 72%)";
   ctx.font = "700 50px 'STKaiti', 'KaiTi', 'Noto Serif SC', serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   const y = MARGIN + CELL * 4.5 + 1;
-  ctx.strokeStyle = "rgb(255 243 219 / 30%)";
+  ctx.strokeStyle = "rgb(255 245 226 / 34%)";
   ctx.lineWidth = 0.8;
-  ctx.strokeText(L.riverLeft, MARGIN + CELL * 2, y);
-  ctx.strokeText(L.riverRight, MARGIN + CELL * 6, y);
-  ctx.fillText(L.riverLeft, MARGIN + CELL * 2, y);
-  ctx.fillText(L.riverRight, MARGIN + CELL * 6, y);
+  drawRiverLabel(L.riverLeft, MARGIN + CELL * 2, y);
+  drawRiverLabel(L.riverRight, MARGIN + CELL * 6, y);
+  ctx.restore();
+}
+
+function drawRiverLabel(text, x, y) {
+  ctx.save();
+  if (isBoardFlipped()) {
+    ctx.translate(x, y);
+    ctx.rotate(Math.PI);
+    ctx.translate(-x, -y);
+  }
+  ctx.strokeText(text, x, y);
+  ctx.fillText(text, x, y);
   ctx.restore();
 }
 
