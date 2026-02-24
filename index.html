@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Xiangqi Online</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="lobby-overlay" id="lobbyOverlay">
+    <form class="lobby-card" id="joinForm">
+      <h2>进入联机房间</h2>
+      <label class="input-field" for="nicknameInput">
+        <span>昵称</span>
+        <input id="nicknameInput" name="nickname" type="text" maxlength="20" required placeholder="例如：小帅" />
+      </label>
+      <label class="input-field" for="roomInput">
+        <span>房间号</span>
+        <input id="roomInput" name="room" type="text" maxlength="24" required placeholder="例如：1001" />
+      </label>
+      <button id="joinBtn" type="submit">进入对局</button>
+      <p class="lobby-hint">前两位玩家自动分配红/黑，后续进入者为旁观者。</p>
+      <p class="lobby-error" id="joinError"></p>
+    </form>
+  </div>
+
+  <main class="app">
+    <div class="topbar">
+      <h1 id="titleText">Xiangqi</h1>
+      <p class="session" id="sessionText">未加入房间</p>
+      <div class="actions">
+        <button id="undoBtn" type="button">Undo</button>
+        <button id="restartBtn" type="button">Restart</button>
+      </div>
+    </div>
+
+    <div class="status">
+      <span class="status-tag" id="turnTag">Turn</span>
+      <span id="statusText">Status</span>
+    </div>
+
+    <div class="board-wrap">
+      <canvas id="board"></canvas>
+    </div>
+
+    <div class="tips" id="tipsText">
+      Local two-player mode. No network play.
+    </div>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="./app.js" defer></script>
+</body>
+</html>

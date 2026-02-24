@@ -1,0 +1,232 @@
+:root {
+  --bg: #7a4d2c;
+  --text: #2e2a26;
+  --paper: #f8e6c8;
+  --deep: #53311d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  padding: 12px;
+  display: grid;
+  place-items: center;
+  font-family: "Noto Serif SC", "STKaiti", "KaiTi", serif;
+  color: var(--text);
+  background:
+    radial-gradient(700px 480px at -12% -10%, rgb(223 172 118 / 52%) 0%, transparent 65%),
+    radial-gradient(960px 760px at 115% 120%, rgb(46 24 11 / 55%) 0%, transparent 66%),
+    repeating-linear-gradient(
+      16deg,
+      rgb(255 219 171 / 4%) 0 24px,
+      rgb(59 34 16 / 7%) 24px 48px
+    ),
+    linear-gradient(180deg, #9a643b 0%, #7b4e2f 48%, #683f26 100%),
+    var(--bg);
+}
+
+.app {
+  width: min(100%, 740px);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  animation: app-in 420ms ease both;
+}
+
+.topbar {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.2;
+  color: rgb(255 241 214 / 95%);
+  text-shadow: 0 2px 8px rgb(45 24 10 / 55%);
+}
+
+.session {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  word-break: break-word;
+  color: rgb(255 229 191 / 92%);
+}
+
+.actions {
+  display: none;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgb(49 28 15 / 35%);
+  color: rgb(255 233 200 / 96%);
+  backdrop-filter: blur(2px);
+}
+
+.status-tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--deep);
+  background: var(--paper);
+  white-space: nowrap;
+}
+
+.board-wrap {
+  width: 100%;
+  overflow: visible;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  animation: board-in 520ms ease both;
+}
+
+canvas {
+  display: block;
+  width: min(100%, 620px);
+  height: auto;
+  margin: 0 auto;
+  border-radius: 10px;
+  background: transparent;
+  touch-action: manipulation;
+  box-shadow:
+    0 16px 26px rgb(40 20 7 / 40%),
+    0 3px 0 rgb(251 216 170 / 14%);
+}
+
+.tips {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  color: rgb(255 234 202 / 92%);
+  background: rgb(49 28 15 / 35%);
+}
+
+.lobby-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background:
+    radial-gradient(500px 320px at 50% 30%, rgb(30 18 10 / 50%), transparent 80%),
+    rgb(25 15 8 / 58%);
+  backdrop-filter: blur(2px);
+}
+
+.lobby-overlay.hidden {
+  display: none;
+}
+
+.lobby-card {
+  width: min(100%, 380px);
+  padding: 18px 16px;
+  border-radius: 14px;
+  background: linear-gradient(160deg, rgb(251 227 189 / 98%), rgb(235 197 149 / 97%));
+  box-shadow:
+    0 18px 30px rgb(21 12 6 / 45%),
+    inset 0 1px 0 rgb(255 246 223 / 75%);
+}
+
+.lobby-card h2 {
+  margin: 0 0 14px;
+  font-size: 22px;
+  color: var(--deep);
+}
+
+.input-field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 14px;
+  color: #59321d;
+}
+
+.input-field input {
+  width: 100%;
+  border: 1px solid rgb(126 74 38 / 35%);
+  border-radius: 8px;
+  padding: 9px 10px;
+  font: inherit;
+  color: #321b0e;
+  background: rgb(255 246 228 / 96%);
+}
+
+#joinBtn {
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  font: inherit;
+  color: #fff4dc;
+  background: linear-gradient(180deg, #99582c, #794426);
+  cursor: pointer;
+}
+
+#joinBtn:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.lobby-hint {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: #64402a;
+}
+
+.lobby-error {
+  margin: 8px 0 0;
+  min-height: 18px;
+  font-size: 13px;
+  color: #9a1f1f;
+}
+
+@keyframes app-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes board-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 560px) {
+  .app {
+    width: 100%;
+  }
+
+  .topbar h1 {
+    font-size: 24px;
+  }
+}
